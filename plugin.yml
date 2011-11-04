@@ -1,0 +1,4 @@
+name: MachinaDrill
+main: me.lyneira.MachinaDrill.MachinaDrill
+depend: [MachinaCraft]
+version: 1.0
