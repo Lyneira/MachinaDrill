@@ -8,21 +8,21 @@ import org.bukkit.plugin.PluginDescriptionFile;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public class MachinaDrill extends JavaPlugin {
-	final Logger log = Logger.getLogger("Minecraft");
+	final static Logger log = Logger.getLogger("Minecraft");
 
 	public final void onEnable() {
 		PluginDescriptionFile pdf = getDescription();
 		log.info(pdf.getName() + " version " + pdf.getVersion()
 				+ " is now enabled.");
 
-		MachinaCraft.instance.registerBlueprint(DrillBlueprint.blueprint);
+		MachinaCraft.plugin.registerBlueprint(DrillBlueprint.instance);
 	}
 
 	public final void onDisable() {
 		PluginDescriptionFile pdf = getDescription();
 		log.info(pdf.getName() + " is now disabled.");
 
-		MachinaCraft.instance.unRegisterBlueprint(DrillBlueprint.blueprint);
+		MachinaCraft.plugin.unRegisterBlueprint(DrillBlueprint.instance);
 	}
 
 }

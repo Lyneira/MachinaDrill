@@ -2,9 +2,11 @@ package me.lyneira.MachinaDrill;
 
 import me.lyneira.MachinaCraft.BlockData;
 import me.lyneira.MachinaCraft.BlockLocation;
+import me.lyneira.MachinaCraft.BlockRotation;
+import me.lyneira.MachinaCraft.BlockVector;
 import me.lyneira.MachinaCraft.Fuel;
 import me.lyneira.MachinaCraft.HeartBeatEvent;
-import me.lyneira.MachinaCraft.Machina;
+import me.lyneira.MachinaCraft.Movable;
 
 import org.bukkit.Material;
 import org.bukkit.block.Block;
@@ -19,26 +21,13 @@ import org.bukkit.inventory.ItemStack;
  * 
  * @author Lyneira
  */
-final class Drill implements Machina {
+final class Drill extends Movable {
 	/**
 	 * The number of server ticks to wait for a move action.
 	 */
 	private static final int moveDelay = 20;
 
-	/**
-	 * The blueprint data for the drill.
-	 */
-	private final DrillBlueprintData blueprint;
-
-	/**
-	 * The forward direction of the drill.
-	 */
-	private final BlockFace direction;
-
-	/**
-	 * The backwards direction of the drill.
-	 */
-	private final BlockFace backward;
+	private final BlockVector[] drillPattern;
 
 	/**
 	 * The amount of energy stored. For the Drill, this is just the number of
@@ -77,8 +66,8 @@ final class Drill implements Machina {
 	private final ActionQueue queue = new ActionQueue();
 
 	/**
-	 * Creates a new drill for the given MachinaCraft plugin, with the anchor at the
-	 * given BlockLocation and the given Orientation
+	 * Creates a new drill for the given MachinaCraft plugin, with the anchor at
+	 * the given BlockLocation and the given Orientation
 	 * 
 	 * @param plugin
 	 *            The MachinaCraft plugin
@@ -87,21 +76,17 @@ final class Drill implements Machina {
 	 * @param orientation
 	 *            The orientation of the drill
 	 */
-	Drill(final BlockLocation anchor, final BlockFace direction,
-			final DrillBlueprintData blueprint) {
-		this.direction = direction;
-		backward = direction.getOppositeFace();
-		this.blueprint = blueprint;
+	Drill(final DrillBlueprint blueprint, BlockLocation anchor,
+			final BlockRotation yaw) {
+		super(blueprint, yaw);
 
+		drillPattern = DrillBlueprint.drillPattern.get(yaw);
 		// Set furnace to burning state.
 		Block furnace = anchor.getRelative(
-				blueprint.blueprint[DrillBlueprint.furnaceIndex]).getBlock();
+				blueprint.getByIndex(DrillBlueprint.furnaceIndex, yaw))
+				.getBlock();
 		Inventory inventory = ((Furnace) furnace.getState()).getInventory();
 		setFurnace(furnace, true, inventory);
-	}
-
-	public final boolean verify(final BlockLocation anchor) {
-		return DrillBlueprint.verify(anchor, blueprint);
 	}
 
 	/**
@@ -135,7 +120,7 @@ final class Drill implements Machina {
 	 */
 	private boolean doDrill(final BlockLocation anchor) {
 		BlockLocation target = anchor
-				.getRelative(blueprint.drillPattern[queue.patternIndex]);
+				.getRelative(drillPattern[queue.patternIndex]);
 		int typeId = target.getTypeId();
 		if (BlockData.isDrillable(typeId)) {
 			if (!useEnergy(anchor, BlockData.getDrillTime(typeId))) {
@@ -146,7 +131,7 @@ final class Drill implements Machina {
 			if (item != null) {
 				// Drop item above the furnace
 				anchor.getRelative(
-						blueprint.blueprint[DrillBlueprint.furnaceIndex]
+						blueprint.getByIndex(DrillBlueprint.furnaceIndex, yaw)
 								.add(BlockFace.UP)).dropItem(item);
 			}
 		}
@@ -163,21 +148,17 @@ final class Drill implements Machina {
 	 */
 	private BlockLocation doMove(final BlockLocation anchor) {
 		// Check for ground at the new base
-		BlockLocation newAnchor = anchor.getRelative(direction);
-		BlockLocation ground = newAnchor
-				.getRelative(blueprint.blueprint[DrillBlueprint.coreIndex]
-						.add(BlockFace.DOWN));
+		BlockFace face = yaw.getFacing();
+		BlockLocation newAnchor = anchor.getRelative(face);
+		BlockLocation ground = newAnchor.getRelative(blueprint.getByIndex(
+				DrillBlueprint.centralBaseIndex, yaw).add(BlockFace.DOWN));
 		if (!BlockData.isSolid(ground.getTypeId())) {
 			return null;
 		}
 
 		// Collision detection
-		BlockLocation[] differencePlus = DrillBlueprint
-				.calculateDifferencePlus(anchor, blueprint);
-		for (BlockLocation i : differencePlus) {
-			if (!i.isEmpty()) {
-				return null;
-			}
+		if (blueprint.detectCollision(anchor, face, yaw)) {
+			return null;
 		}
 
 		// Use energy
@@ -186,38 +167,7 @@ final class Drill implements Machina {
 		}
 
 		// Okay to move.
-		BlockLocation[] differenceMinus = DrillBlueprint
-				.calculateDifferenceMinus(anchor, blueprint);
-		BlockLocation[] newBlocks = DrillBlueprint.calculateBlocks(newAnchor,
-				blueprint);
-
-		// Collect lever data
-		byte oldLever = anchor
-				.getRelative(blueprint.blueprint[DrillBlueprint.leverIndex])
-				.getBlock().getData();
-
-		// Setting the new furnace clears the old furnace's inventory, which
-		// needs to be done before the old furnace is destroyed.
-		Inventory inventory = ((Furnace) anchor
-				.getRelative(blueprint.blueprint[DrillBlueprint.furnaceIndex])
-				.getBlock().getState()).getInventory();
-		setFurnace(newBlocks[DrillBlueprint.furnaceIndex].getBlock(), true,
-				inventory);
-
-		// Remove all blocks behind the new machina position.
-		for (BlockLocation i : differenceMinus) {
-			i.setEmpty();
-		}
-
-		// Set nonspecial blocks including the core
-		for (int i = DrillBlueprint.coreIndex; i < DrillBlueprint.blueprintSize; i++) {
-			newBlocks[i].setType(blueprint.blueprintType[i]);
-		}
-
-		// Lever is attached to stuff, so should be placed last
-		Block newLever = newBlocks[DrillBlueprint.leverIndex].getBlock();
-		newLever.setType(Material.LEVER);
-		newLever.setData(oldLever);
+		moveByFace(anchor, face);
 
 		return newAnchor;
 	}
@@ -231,8 +181,8 @@ final class Drill implements Machina {
 	 */
 	private int queueAction(final BlockLocation anchor) {
 		while (!queue.nextMove()) {
-			int typeId = anchor.getRelative(
-					blueprint.drillPattern[queue.patternIndex]).getTypeId();
+			int typeId = anchor.getRelative(drillPattern[queue.patternIndex])
+					.getTypeId();
 			if (BlockData.isDrillable(typeId)) {
 				return BlockData.getDrillTime(typeId);
 			}
@@ -253,8 +203,8 @@ final class Drill implements Machina {
 		while (currentEnergy < energy) {
 			int newFuel = Fuel.consume((Furnace) anchor
 					.getRelative(
-							blueprint.blueprint[DrillBlueprint.furnaceIndex])
-					.getBlock().getState());
+							blueprint.getByIndex(DrillBlueprint.furnaceIndex,
+									yaw)).getBlock().getState());
 			if (newFuel > 0) {
 				currentEnergy += newFuel;
 			} else {
@@ -274,7 +224,8 @@ final class Drill implements Machina {
 	public void onDeActivate(final BlockLocation anchor) {
 		// Set furnace to off state.
 		Block furnace = anchor.getRelative(
-				blueprint.blueprint[DrillBlueprint.furnaceIndex]).getBlock();
+				blueprint.getByIndex(DrillBlueprint.furnaceIndex, yaw))
+				.getBlock();
 		if (furnace.getType() == Material.BURNING_FURNACE) {
 			Inventory inventory = ((Furnace) furnace.getState()).getInventory();
 			setFurnace(furnace, false, inventory);
@@ -303,7 +254,8 @@ final class Drill implements Machina {
 			newFurnace.setType(Material.FURNACE);
 		}
 		// Set furnace direction
-		newFurnace.setData(new org.bukkit.material.Furnace(backward));
+		newFurnace.setData(new org.bukkit.material.Furnace(yaw.getOpposite()
+				.getFacing()));
 
 		newFurnace.update(true);
 		Inventory newInventory = ((Furnace) furnace.getState()).getInventory();
