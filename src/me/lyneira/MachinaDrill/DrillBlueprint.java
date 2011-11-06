@@ -13,6 +13,7 @@ import me.lyneira.MachinaCraft.MovableBlueprint;
 
 import org.bukkit.Material;
 import org.bukkit.block.BlockFace;
+import org.bukkit.entity.Player;
 
 /**
  * MachinaBlueprint representing a Drill blueprint
@@ -36,10 +37,10 @@ final class DrillBlueprint extends MovableBlueprint {
 
 	static {
 		// Add key blocks
-		leverIndex = blueprint.addKey(new BlockVector(0, 1, 0),
-				Material.LEVER, true, true, false);
-		centralBaseIndex = blueprint.addKey(
-				new BlockVector(0, -1, 0), baseMaterial, false, false, false);
+		leverIndex = blueprint.addKey(new BlockVector(0, 1, 0), Material.LEVER,
+				true, true, false);
+		centralBaseIndex = blueprint.addKey(new BlockVector(0, -1, 0),
+				baseMaterial, false, false, false);
 		furnaceIndex = blueprint.addKey(new BlockVector(-1, -1, 0),
 				burningFurnaceMaterial, false, true, true);
 		// Add non-key blocks
@@ -47,7 +48,6 @@ final class DrillBlueprint extends MovableBlueprint {
 				.add(new BlockVector(1, 0, 0), headMaterial)
 				.add(new BlockVector(0, -1, 1), baseMaterial)
 				.add(new BlockVector(0, -1, -1), baseMaterial);
-		MachinaDrill.log.info("Furnace has handle " + Integer.toString(furnaceIndex));
 		// Add drill pattern data 3x3
 		drillPatternSize = 9;
 		BlockVector[] basePattern = new BlockVector[drillPatternSize];
@@ -68,18 +68,19 @@ final class DrillBlueprint extends MovableBlueprint {
 			drillPattern.put(i, rotatedPattern);
 		}
 	}
-	
+
 	public final static DrillBlueprint instance = new DrillBlueprint();
+
 	private DrillBlueprint() {
 		super(blueprint);
 		blueprint = null;
 	}
 
 	/**
-	 * Detects whether a drill is present at the given BlockLocation
-	 * Key blocks defined above must be detected manually.
+	 * Detects whether a drill is present at the given BlockLocation Key blocks
+	 * defined above must be detected manually.
 	 */
-	public Machina detect(final BlockLocation anchor, final BlockFace leverFace) {
+	public Machina detect(Player player, final BlockLocation anchor, final BlockFace leverFace) {
 		if (leverFace != BlockFace.UP) {
 			return null;
 		}
@@ -90,10 +91,13 @@ final class DrillBlueprint extends MovableBlueprint {
 		}
 		BlockLocation centralBase = anchor.getRelative(BlockFace.DOWN);
 		if (centralBase.checkType(baseMaterial)) {
-			// Search for a furnace around the core.
+			// Search for a furnace around the central base.
 			for (BlockRotation i : BlockRotation.values()) {
-				if (centralBase.getRelative(i.getFacing()).checkType(furnaceMaterial)) {
+				if (centralBase.getRelative(i.getFacing()).checkType(
+						furnaceMaterial)) {
 					BlockRotation yaw = i.getOpposite();
+					// The key blocks and yaw have been detected, now we can
+					// leave the rest to the MovableBlueprint framework.
 					if (detectOther(anchor, yaw)) {
 						return new Drill(instance, anchor, yaw);
 					} else {
