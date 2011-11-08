@@ -13,6 +13,9 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.Furnace;
+import org.bukkit.entity.Player;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
@@ -27,6 +30,10 @@ final class Drill extends Movable {
 	 */
 	private static final int moveDelay = 20;
 
+	/**
+	 * Array of vectors that determines where the drill looks for blocks to
+	 * break.
+	 */
 	private final BlockVector[] drillPattern;
 
 	/**
@@ -36,7 +43,12 @@ final class Drill extends Movable {
 	private int currentEnergy = 0;
 
 	/**
-	 * Class representing the next action for the drill.
+	 * The player that activated the drill.
+	 */
+	private final Player player;
+
+	/**
+	 * Class that determines the next action for the drill.
 	 */
 	private final class ActionQueue {
 		public boolean drill = true;
@@ -76,10 +88,11 @@ final class Drill extends Movable {
 	 * @param orientation
 	 *            The orientation of the drill
 	 */
-	Drill(final DrillBlueprint blueprint, BlockLocation anchor,
+	Drill(final DrillBlueprint blueprint, Player player, BlockLocation anchor,
 			final BlockRotation yaw) {
 		super(blueprint, yaw);
 
+		this.player = player;
 		drillPattern = DrillBlueprint.drillPattern.get(yaw);
 		// Set furnace to burning state.
 		Block furnace = anchor.getRelative(
@@ -93,6 +106,10 @@ final class Drill extends Movable {
 	 * Initiates the current move or drill action in the action queue.
 	 */
 	public HeartBeatEvent heartBeat(final BlockLocation anchor) {
+		// Drills will not function for offline players.
+		if (!player.isOnline())
+			return null;
+
 		if (queue.drill) {
 			if (queue.patternIndex >= 0) {
 				if (!doDrill(anchor)) {
@@ -123,9 +140,20 @@ final class Drill extends Movable {
 				.getRelative(drillPattern[queue.patternIndex]);
 		int typeId = target.getTypeId();
 		if (BlockData.isDrillable(typeId)) {
+			// Simulate a block break event on behalf of the player who started
+			// the drill. Only break if the event wasn't cancelled by whatever
+			// protection plugins may exist.
+			Block block = target.getBlock();
+			BlockBreakEvent breakEvent = new BlockBreakEvent(block, player);
+			MachinaDrill.pluginManager.callEvent(breakEvent);
+			if (breakEvent.isCancelled()) {
+				return false;
+			}
+
 			if (!useEnergy(anchor, BlockData.getDrillTime(typeId))) {
 				return false;
 			}
+
 			ItemStack item = BlockData.breakBlock(target);
 			target.setType(Material.AIR);
 			if (item != null) {
@@ -158,6 +186,12 @@ final class Drill extends Movable {
 
 		// Collision detection
 		if (blueprint.detectCollision(anchor, face, yaw)) {
+			return null;
+		}
+
+		// Simulate a block place event to give protection plugins a chance to
+		// stop the drill move
+		if (!canPlace(newAnchor)) {
 			return null;
 		}
 
@@ -216,6 +250,21 @@ final class Drill extends Movable {
 	}
 
 	/**
+	 * Simply checks the appropriate deactivate permission to determine whether
+	 * the player may deactivate the drill.
+	 */
+	public boolean playerDeActivate(final BlockLocation anchor, Player player) {
+		if (this.player == player) {
+			if (player.hasPermission("machinadrill.deactivate-own"))
+				return true;
+		} else {
+			if (player.hasPermission("machinadrill.deactivate-all"))
+				return true;
+		}
+		return false;
+	}
+
+	/**
 	 * Returns the burning furnace to its normal state.
 	 * 
 	 * @param anchor
@@ -260,5 +309,32 @@ final class Drill extends Movable {
 		newFurnace.update(true);
 		Inventory newInventory = ((Furnace) furnace.getState()).getInventory();
 		newInventory.setContents(contents);
+	}
+
+	/**
+	 * Simulates a block place event on behalf of the player who started the
+	 * drill. Returns true if the player could build the new drill head block.
+	 * 
+	 * @param newAnchor
+	 *            The new anchor location of the drill.
+	 * @return True if the player may place a block at the drill's new head
+	 *         location.
+	 */
+	private boolean canPlace(BlockLocation newAnchor) {
+		Block placedBlock = newAnchor.getRelative(
+				blueprint.getByIndex(DrillBlueprint.drillHeadIndex, yaw))
+				.getBlock();
+		BlockState replacedBlockState = placedBlock.getState();
+		replacedBlockState.setType(DrillBlueprint.headMaterial);
+		Block placedAgainst = placedBlock.getRelative(yaw.getOpposite()
+				.getFacing());
+
+		BlockPlaceEvent placeEvent = new BlockPlaceEvent(placedBlock,
+				replacedBlockState, placedAgainst, null, player, true);
+		MachinaDrill.pluginManager.callEvent(placeEvent);
+
+		if (placeEvent.isCancelled())
+			return false;
+		return true;
 	}
 }

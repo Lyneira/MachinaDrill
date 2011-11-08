@@ -27,13 +27,14 @@ final class DrillBlueprint extends MovableBlueprint {
 	final static int drillPatternSize;
 	private final static Material anchorMaterial = Material.GOLD_BLOCK;
 	private final static Material baseMaterial = Material.WOOD;
-	private final static Material headMaterial = Material.IRON_BLOCK;
+	final static Material headMaterial = Material.IRON_BLOCK;
 	private final static Material furnaceMaterial = Material.FURNACE;
 	private final static Material burningFurnaceMaterial = Material.BURNING_FURNACE;
 
 	final static int leverIndex;
 	final static int centralBaseIndex;
 	final static int furnaceIndex;
+	final static int drillHeadIndex;
 
 	static {
 		// Add key blocks
@@ -43,9 +44,10 @@ final class DrillBlueprint extends MovableBlueprint {
 				baseMaterial, false, false, false);
 		furnaceIndex = blueprint.addKey(new BlockVector(-1, -1, 0),
 				burningFurnaceMaterial, false, true, true);
+		drillHeadIndex = blueprint.addKey(new BlockVector(1, 0, 0),
+				headMaterial, false, false, false);
 		// Add non-key blocks
 		blueprint.add(new BlockVector(0, 0, 0), anchorMaterial)
-				.add(new BlockVector(1, 0, 0), headMaterial)
 				.add(new BlockVector(0, -1, 1), baseMaterial)
 				.add(new BlockVector(0, -1, -1), baseMaterial);
 		// Add drill pattern data 3x3
@@ -80,15 +82,19 @@ final class DrillBlueprint extends MovableBlueprint {
 	 * Detects whether a drill is present at the given BlockLocation Key blocks
 	 * defined above must be detected manually.
 	 */
-	public Machina detect(Player player, final BlockLocation anchor, final BlockFace leverFace) {
-		if (leverFace != BlockFace.UP) {
+	public Machina detect(Player player, final BlockLocation anchor,
+			final BlockFace leverFace) {
+		if (leverFace != BlockFace.UP)
 			return null;
-		}
+
+		if (!player.hasPermission("machinadrill.activate"))
+			return null;
+
 		// Check if the drill is on solid ground.
 		if (!BlockData.isSolid(anchor.getRelative(BlockFace.DOWN, 2)
-				.getTypeId())) {
+				.getTypeId()))
 			return null;
-		}
+
 		BlockLocation centralBase = anchor.getRelative(BlockFace.DOWN);
 		if (centralBase.checkType(baseMaterial)) {
 			// Search for a furnace around the central base.
@@ -96,12 +102,15 @@ final class DrillBlueprint extends MovableBlueprint {
 				if (centralBase.getRelative(i.getFacing()).checkType(
 						furnaceMaterial)) {
 					BlockRotation yaw = i.getOpposite();
-					// The key blocks and yaw have been detected, now we can
-					// leave the rest to the MovableBlueprint framework.
-					if (detectOther(anchor, yaw)) {
-						return new Drill(instance, anchor, yaw);
-					} else {
-						return null;
+					if (anchor.getRelative(yaw.getFacing()).checkType(
+							headMaterial)) {
+						// The key blocks and yaw have been detected, now we can
+						// leave the rest to the MovableBlueprint framework.
+						if (detectOther(anchor, yaw)) {
+							return new Drill(instance, player, anchor, yaw);
+						} else {
+							return null;
+						}
 					}
 				}
 			}
