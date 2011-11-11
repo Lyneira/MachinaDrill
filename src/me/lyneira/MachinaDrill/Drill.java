@@ -1,5 +1,7 @@
 package me.lyneira.MachinaDrill;
 
+import java.util.List;
+
 import me.lyneira.MachinaCraft.BlockData;
 import me.lyneira.MachinaCraft.BlockLocation;
 import me.lyneira.MachinaCraft.BlockRotation;
@@ -11,11 +13,9 @@ import me.lyneira.MachinaCraft.Movable;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
-import org.bukkit.block.BlockState;
 import org.bukkit.block.Furnace;
 import org.bukkit.entity.Player;
 import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
@@ -37,15 +37,10 @@ final class Drill extends Movable {
 	private final BlockVector[] drillPattern;
 
 	/**
-	 * The amount of energy stored. For the Drill, this is just the number of
-	 * server ticks left before the drill needs to consume new fuel.
+	 * The amount of energy stored. This is just the number of server ticks left
+	 * before needing to consume new fuel.
 	 */
 	private int currentEnergy = 0;
-
-	/**
-	 * The player that activated the drill.
-	 */
-	private final Player player;
 
 	/**
 	 * Class that determines the next action for the drill.
@@ -63,7 +58,7 @@ final class Drill extends Movable {
 		public final boolean nextMove() {
 			if (drill) {
 				patternIndex++;
-				if (patternIndex == DrillBlueprint.drillPatternSize) {
+				if (patternIndex == Blueprint.drillPatternSize) {
 					patternIndex = 0;
 					drill = false;
 					return true;
@@ -78,28 +73,29 @@ final class Drill extends Movable {
 	private final ActionQueue queue = new ActionQueue();
 
 	/**
-	 * Creates a new drill for the given MachinaCraft plugin, with the anchor at
-	 * the given BlockLocation and the given Orientation
+	 * Creates a new drill.
 	 * 
 	 * @param plugin
 	 *            The MachinaCraft plugin
 	 * @param anchor
 	 *            The anchor location of the drill
-	 * @param orientation
-	 *            The orientation of the drill
+	 * @param yaw
+	 *            The direction of the drill
+	 * @param moduleIndices
+	 *            The active modules for the drill
 	 */
-	Drill(final DrillBlueprint blueprint, Player player, BlockLocation anchor,
-			final BlockRotation yaw) {
-		super(blueprint, yaw);
+	Drill(final Blueprint blueprint, Player player, BlockLocation anchor,
+			final BlockRotation yaw, final List<Integer> moduleIndices) {
+		super(blueprint, player, yaw, moduleIndices);
 
 		this.player = player;
-		drillPattern = DrillBlueprint.drillPattern.get(yaw);
+		drillPattern = Blueprint.drillPattern.get(yaw);
 		// Set furnace to burning state.
 		Block furnace = anchor.getRelative(
-				blueprint.getByIndex(DrillBlueprint.furnaceIndex, yaw))
-				.getBlock();
+				blueprint.getByIndex(Blueprint.furnaceIndex, yaw,
+						Blueprint.mainModuleIndex)).getBlock();
 		Inventory inventory = ((Furnace) furnace.getState()).getInventory();
-		setFurnace(furnace, true, inventory);
+		Fuel.setFurnace(furnace, yaw.getOpposite().getFacing(), true, inventory);
 	}
 
 	/**
@@ -159,8 +155,9 @@ final class Drill extends Movable {
 			if (item != null) {
 				// Drop item above the furnace
 				anchor.getRelative(
-						blueprint.getByIndex(DrillBlueprint.furnaceIndex, yaw)
-								.add(BlockFace.UP)).dropItem(item);
+						blueprint.getByIndex(Blueprint.furnaceIndex, yaw,
+								Blueprint.mainModuleIndex).add(
+								BlockFace.UP)).dropItem(item);
 			}
 		}
 		return true;
@@ -179,19 +176,21 @@ final class Drill extends Movable {
 		BlockFace face = yaw.getFacing();
 		BlockLocation newAnchor = anchor.getRelative(face);
 		BlockLocation ground = newAnchor.getRelative(blueprint.getByIndex(
-				DrillBlueprint.centralBaseIndex, yaw).add(BlockFace.DOWN));
+				Blueprint.centralBaseIndex, yaw,
+				Blueprint.mainModuleIndex).add(BlockFace.DOWN));
 		if (!BlockData.isSolid(ground.getTypeId())) {
 			return null;
 		}
 
 		// Collision detection
-		if (blueprint.detectCollision(anchor, face, yaw)) {
+		if (blueprint.detectCollision(anchor, face, yaw,
+				Blueprint.mainModuleIndex)) {
 			return null;
 		}
 
 		// Simulate a block place event to give protection plugins a chance to
 		// stop the drill move
-		if (!canPlace(newAnchor)) {
+		if (!canPlace(newAnchor, Blueprint.drillHeadIndex, Blueprint.headMaterial, Blueprint.mainModuleIndex)) {
 			return null;
 		}
 
@@ -237,8 +236,9 @@ final class Drill extends Movable {
 		while (currentEnergy < energy) {
 			int newFuel = Fuel.consume((Furnace) anchor
 					.getRelative(
-							blueprint.getByIndex(DrillBlueprint.furnaceIndex,
-									yaw)).getBlock().getState());
+							blueprint.getByIndex(Blueprint.furnaceIndex,
+									yaw, Blueprint.mainModuleIndex))
+					.getBlock().getState());
 			if (newFuel > 0) {
 				currentEnergy += newFuel;
 			} else {
@@ -273,68 +273,12 @@ final class Drill extends Movable {
 	public void onDeActivate(final BlockLocation anchor) {
 		// Set furnace to off state.
 		Block furnace = anchor.getRelative(
-				blueprint.getByIndex(DrillBlueprint.furnaceIndex, yaw))
-				.getBlock();
+				blueprint.getByIndex(Blueprint.furnaceIndex, yaw,
+						Blueprint.mainModuleIndex)).getBlock();
 		if (furnace.getType() == Material.BURNING_FURNACE) {
 			Inventory inventory = ((Furnace) furnace.getState()).getInventory();
-			setFurnace(furnace, false, inventory);
+			Fuel.setFurnace(furnace, yaw.getOpposite().getFacing(), false,
+					inventory);
 		}
-	}
-
-	/**
-	 * Sets the given Block to a Furnace with the given burn state, and sets the
-	 * furnace contents to the given Inventory.
-	 * 
-	 * @param block
-	 *            The block to set as a Furnace
-	 * @param burning
-	 *            Whether the furnace is burning
-	 * @param inventory
-	 *            Inventory to copy over
-	 */
-	private void setFurnace(final Block furnace, final boolean burning,
-			final Inventory inventory) {
-		ItemStack[] contents = inventory.getContents();
-		inventory.clear();
-		BlockState newFurnace = furnace.getState();
-		if (burning) {
-			newFurnace.setType(Material.BURNING_FURNACE);
-		} else {
-			newFurnace.setType(Material.FURNACE);
-		}
-		// Set furnace direction
-		newFurnace.setData(new org.bukkit.material.Furnace(yaw.getOpposite()
-				.getFacing()));
-
-		newFurnace.update(true);
-		Inventory newInventory = ((Furnace) furnace.getState()).getInventory();
-		newInventory.setContents(contents);
-	}
-
-	/**
-	 * Simulates a block place event on behalf of the player who started the
-	 * drill. Returns true if the player could build the new drill head block.
-	 * 
-	 * @param newAnchor
-	 *            The new anchor location of the drill.
-	 * @return True if the player may place a block at the drill's new head
-	 *         location.
-	 */
-	private boolean canPlace(BlockLocation newAnchor) {
-		Block placedBlock = newAnchor.getRelative(
-				blueprint.getByIndex(DrillBlueprint.drillHeadIndex, yaw))
-				.getBlock();
-		BlockState replacedBlockState = placedBlock.getState();
-		replacedBlockState.setType(DrillBlueprint.headMaterial);
-		Block placedAgainst = placedBlock.getRelative(yaw.getOpposite()
-				.getFacing());
-
-		BlockPlaceEvent placeEvent = new BlockPlaceEvent(placedBlock,
-				replacedBlockState, placedAgainst, null, player, true);
-		MachinaDrill.pluginManager.callEvent(placeEvent);
-
-		if (placeEvent.isCancelled())
-			return false;
-		return true;
 	}
 }

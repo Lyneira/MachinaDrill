@@ -1,13 +1,16 @@
 package me.lyneira.MachinaDrill;
 
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
+import java.util.ListIterator;
 import java.util.Map;
 
 import me.lyneira.MachinaCraft.BlockData;
 import me.lyneira.MachinaCraft.BlockLocation;
 import me.lyneira.MachinaCraft.BlockRotation;
 import me.lyneira.MachinaCraft.BlockVector;
-import me.lyneira.MachinaCraft.Blueprint;
+import me.lyneira.MachinaCraft.BlueprintFactory;
 import me.lyneira.MachinaCraft.Machina;
 import me.lyneira.MachinaCraft.MovableBlueprint;
 
@@ -20,10 +23,12 @@ import org.bukkit.entity.Player;
  * 
  * @author Lyneira
  */
-final class DrillBlueprint extends MovableBlueprint {
-	private static Blueprint blueprint = new Blueprint();
+final class Blueprint extends MovableBlueprint {
+	private static List<BlueprintFactory> blueprints;
+	final static int mainModuleIndex;
 	final static Map<BlockRotation, BlockVector[]> drillPattern = new EnumMap<BlockRotation, BlockVector[]>(
 			BlockRotation.class);
+
 	final static int drillPatternSize;
 	private final static Material anchorMaterial = Material.GOLD_BLOCK;
 	private final static Material baseMaterial = Material.WOOD;
@@ -37,19 +42,27 @@ final class DrillBlueprint extends MovableBlueprint {
 	final static int drillHeadIndex;
 
 	static {
-		// Add key blocks
-		leverIndex = blueprint.addKey(new BlockVector(0, 1, 0), Material.LEVER,
-				true, true, false);
-		centralBaseIndex = blueprint.addKey(new BlockVector(0, -1, 0),
-				baseMaterial, false, false, false);
-		furnaceIndex = blueprint.addKey(new BlockVector(-1, -1, 0),
-				burningFurnaceMaterial, false, true, true);
-		drillHeadIndex = blueprint.addKey(new BlockVector(1, 0, 0),
-				headMaterial, false, false, false);
-		// Add non-key blocks
-		blueprint.add(new BlockVector(0, 0, 0), anchorMaterial)
+		blueprints = new ArrayList<BlueprintFactory>(1);
+		mainModuleIndex = blueprints.size();
+		BlueprintFactory mainModule = new BlueprintFactory();
+		blueprints.add(mainModule);
+		mainModule
+				// Add key blocks
+				.addKey(new BlockVector(0, 1, 0), Material.LEVER)
+				.addKey(new BlockVector(0, -1, 0), baseMaterial)
+				.addKey(new BlockVector(-1, -1, 0), burningFurnaceMaterial)
+				.addKey(new BlockVector(1, 0, 0), headMaterial)
+				// Add non-key blocks
+				.add(new BlockVector(0, 0, 0), anchorMaterial)
 				.add(new BlockVector(0, -1, 1), baseMaterial)
 				.add(new BlockVector(0, -1, -1), baseMaterial);
+		// Get handles to key blocks now. This finalizes the blueprint.
+		ListIterator<Integer> handles = mainModule.getHandlesFinal().listIterator();
+		leverIndex = handles.next();
+		centralBaseIndex = handles.next();
+		furnaceIndex = handles.next();
+		drillHeadIndex = handles.next();
+
 		// Add drill pattern data 3x3
 		drillPatternSize = 9;
 		BlockVector[] basePattern = new BlockVector[drillPatternSize];
@@ -71,15 +84,15 @@ final class DrillBlueprint extends MovableBlueprint {
 		}
 	}
 
-	public final static DrillBlueprint instance = new DrillBlueprint();
+	public final static Blueprint instance = new Blueprint();
 
-	private DrillBlueprint() {
-		super(blueprint);
-		blueprint = null;
+	private Blueprint() {
+		super(blueprints);
+		blueprints = null;
 	}
 
 	/**
-	 * Detects whether a drill is present at the given BlockLocation Key blocks
+	 * Detects whether a drill is present at the given BlockLocation. Key blocks
 	 * defined above must be detected manually.
 	 */
 	public Machina detect(Player player, final BlockLocation anchor,
@@ -106,8 +119,10 @@ final class DrillBlueprint extends MovableBlueprint {
 							headMaterial)) {
 						// The key blocks and yaw have been detected, now we can
 						// leave the rest to the MovableBlueprint framework.
-						if (detectOther(anchor, yaw)) {
-							return new Drill(instance, player, anchor, yaw);
+						if (detectOther(anchor, yaw, mainModuleIndex)) {
+							List<Integer> detectedModules = new ArrayList<Integer>(1);
+							detectedModules.add(mainModuleIndex);
+							return new Drill(instance, player, anchor, yaw, detectedModules);
 						} else {
 							return null;
 						}
