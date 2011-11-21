@@ -34,7 +34,7 @@ final class Drill extends Movable {
 	 * Array of vectors that determines where the drill looks for blocks to
 	 * break.
 	 */
-	private final BlockVector[] drillPattern;
+	private BlockVector[] drillPattern;
 
 	/**
 	 * The amount of energy stored. This is just the number of server ticks left
@@ -43,34 +43,14 @@ final class Drill extends Movable {
 	private int currentEnergy = 0;
 
 	/**
-	 * Class that determines the next action for the drill.
+	 * The next target location for the drill.
 	 */
-	private final class ActionQueue {
-		public boolean drill = true;
-		public int patternIndex = -1;
+	private BlockLocation queuedTarget = null;
 
-		/**
-		 * Returns true if the end of the drill pattern has been reached and the
-		 * drill should move.
-		 * 
-		 * @return True if the drill should move
-		 */
-		public final boolean nextMove() {
-			if (drill) {
-				patternIndex++;
-				if (patternIndex == Blueprint.drillPatternSize) {
-					patternIndex = 0;
-					drill = false;
-					return true;
-				}
-			} else {
-				drill = true;
-			}
-			return false;
-		}
-	}
-
-	private final ActionQueue queue = new ActionQueue();
+	/**
+	 * The typeId of the next target location.
+	 */
+	private int nextTypeId;
 
 	/**
 	 * Creates a new drill.
@@ -84,18 +64,13 @@ final class Drill extends Movable {
 	 * @param moduleIndices
 	 *            The active modules for the drill
 	 */
-	Drill(final Blueprint blueprint, Player player, BlockLocation anchor,
-			final BlockRotation yaw, final List<Integer> moduleIndices) {
-		super(blueprint, player, yaw, moduleIndices);
+	Drill(final Blueprint blueprint, final List<Integer> moduleIndices, final BlockRotation yaw, Player player, BlockLocation anchor) {
+		super(blueprint, moduleIndices, yaw, player);
 
 		this.player = player;
 		drillPattern = Blueprint.drillPattern.get(yaw);
 		// Set furnace to burning state.
-		Block furnace = anchor.getRelative(
-				blueprint.getByIndex(Blueprint.furnaceIndex, yaw,
-						Blueprint.mainModuleIndex)).getBlock();
-		Inventory inventory = ((Furnace) furnace.getState()).getInventory();
-		Fuel.setFurnace(furnace, yaw.getOpposite().getFacing(), true, inventory);
+		setFurnace(anchor, true);
 	}
 
 	/**
@@ -106,20 +81,20 @@ final class Drill extends Movable {
 		if (!player.isOnline())
 			return null;
 
-		if (queue.drill) {
-			if (queue.patternIndex >= 0) {
-				if (!doDrill(anchor)) {
-					return null;
-				}
-			}
-			return new HeartBeatEvent(queueAction(anchor));
-		} else {
+		BlockLocation target = nextTarget(anchor);
+		if (target == null && queuedTarget == null) {
 			BlockLocation newAnchor = doMove(anchor);
 			if (newAnchor == null) {
 				return null;
 			}
 			return new HeartBeatEvent(queueAction(newAnchor), newAnchor);
+		} else if (target != null && target.equals(queuedTarget)
+				&& target.getTypeId() == nextTypeId) {
+			if (!doDrill(anchor)) {
+				return null;
+			}
 		}
+		return new HeartBeatEvent(queueAction(anchor));
 	}
 
 	/**
@@ -132,32 +107,29 @@ final class Drill extends Movable {
 	 *         if the drill was successful or there was nothing to drill.
 	 */
 	private boolean doDrill(final BlockLocation anchor) {
-		BlockLocation target = anchor
-				.getRelative(drillPattern[queue.patternIndex]);
-		int typeId = target.getTypeId();
-		if (BlockData.isDrillable(typeId)) {
+		if (BlockData.isDrillable(nextTypeId)) {
 			// Simulate a block break event on behalf of the player who started
 			// the drill. Only break if the event wasn't cancelled by whatever
 			// protection plugins may exist.
-			Block block = target.getBlock();
+			Block block = queuedTarget.getBlock();
 			BlockBreakEvent breakEvent = new BlockBreakEvent(block, player);
 			MachinaDrill.pluginManager.callEvent(breakEvent);
 			if (breakEvent.isCancelled()) {
 				return false;
 			}
 
-			if (!useEnergy(anchor, BlockData.getDrillTime(typeId))) {
+			if (!useEnergy(anchor, BlockData.getDrillTime(nextTypeId))) {
 				return false;
 			}
 
-			ItemStack item = BlockData.breakBlock(target);
-			target.setType(Material.AIR);
+			ItemStack item = BlockData.breakBlock(queuedTarget);
+			queuedTarget.setType(Material.AIR);
 			if (item != null) {
 				// Drop item above the furnace
 				anchor.getRelative(
 						blueprint.getByIndex(Blueprint.furnaceIndex, yaw,
-								Blueprint.mainModuleIndex).add(
-								BlockFace.UP)).dropItem(item);
+								Blueprint.mainModuleIndex).add(BlockFace.UP))
+						.dropItem(item);
 			}
 		}
 		return true;
@@ -173,24 +145,24 @@ final class Drill extends Movable {
 	 */
 	private BlockLocation doMove(final BlockLocation anchor) {
 		// Check for ground at the new base
-		BlockFace face = yaw.getFacing();
+		BlockFace face = yaw.getYawFace();
 		BlockLocation newAnchor = anchor.getRelative(face);
 		BlockLocation ground = newAnchor.getRelative(blueprint.getByIndex(
-				Blueprint.centralBaseIndex, yaw,
-				Blueprint.mainModuleIndex).add(BlockFace.DOWN));
+				Blueprint.centralBaseIndex, yaw, Blueprint.mainModuleIndex)
+				.add(BlockFace.DOWN));
 		if (!BlockData.isSolid(ground.getTypeId())) {
 			return null;
 		}
 
 		// Collision detection
-		if (blueprint.detectCollision(anchor, face, yaw,
-				Blueprint.mainModuleIndex)) {
+		if (detectCollision(anchor, face)) {
 			return null;
 		}
 
 		// Simulate a block place event to give protection plugins a chance to
 		// stop the drill move
-		if (!canPlace(newAnchor, Blueprint.drillHeadIndex, Blueprint.headMaterial, Blueprint.mainModuleIndex)) {
+		if (!canPlace(newAnchor, Blueprint.drillHeadIndex,
+				Blueprint.headMaterial, Blueprint.mainModuleIndex)) {
 			return null;
 		}
 
@@ -206,6 +178,47 @@ final class Drill extends Movable {
 	}
 
 	/**
+	 * Rotates the drill to the new direction, if this would not cause a
+	 * collision.
+	 * 
+	 * @param anchor
+	 *            The anchor of the Drill
+	 * @param newYaw
+	 *            The new direction
+	 */
+	void doRotate(final BlockLocation anchor, final BlockRotation newYaw) {
+		BlockRotation rotateBy = newYaw.subtract(yaw);
+		if (rotateBy == BlockRotation.ROTATE_0
+				|| detectCollisionRotate(anchor, rotateBy)) {
+			return;
+		}
+		rotate(anchor, rotateBy);
+		// Reinitialize the drill pattern since we rotated.
+		drillPattern = Blueprint.drillPattern.get(yaw);
+		// Set furnace to correct direction.
+		setFurnace(anchor, true);
+	}
+
+	/**
+	 * Determines the next target block for the drill and returns its location.
+	 * 
+	 * @param anchor
+	 *            The anchor of the drill
+	 * @return The BlockLocation of the next target, or null if no drillable
+	 *         target was found.
+	 */
+	private BlockLocation nextTarget(final BlockLocation anchor) {
+		for (BlockVector i : drillPattern) {
+			BlockLocation location = anchor.getRelative(i);
+			int typeId = location.getTypeId();
+			if (BlockData.isDrillable(typeId)) {
+				return location;
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * Determines the delay for the next action.
 	 * 
 	 * @param anchor
@@ -213,14 +226,13 @@ final class Drill extends Movable {
 	 * @return Delay in server ticks for the next action
 	 */
 	private int queueAction(final BlockLocation anchor) {
-		while (!queue.nextMove()) {
-			int typeId = anchor.getRelative(drillPattern[queue.patternIndex])
-					.getTypeId();
-			if (BlockData.isDrillable(typeId)) {
-				return BlockData.getDrillTime(typeId);
-			}
+		queuedTarget = nextTarget(anchor);
+		if (queuedTarget == null) {
+			return moveDelay;
+		} else {
+			nextTypeId = queuedTarget.getTypeId();
+			return BlockData.getDrillTime(nextTypeId);
 		}
-		return moveDelay;
 	}
 
 	/**
@@ -236,9 +248,9 @@ final class Drill extends Movable {
 		while (currentEnergy < energy) {
 			int newFuel = Fuel.consume((Furnace) anchor
 					.getRelative(
-							blueprint.getByIndex(Blueprint.furnaceIndex,
-									yaw, Blueprint.mainModuleIndex))
-					.getBlock().getState());
+							blueprint.getByIndex(Blueprint.furnaceIndex, yaw,
+									Blueprint.mainModuleIndex)).getBlock()
+					.getState());
 			if (newFuel > 0) {
 				currentEnergy += newFuel;
 			} else {
@@ -250,18 +262,23 @@ final class Drill extends Movable {
 	}
 
 	/**
-	 * Simply checks the appropriate deactivate permission to determine whether
-	 * the player may deactivate the drill.
+	 * If the player has permission to deactivate the drill, deactivate it. Or
+	 * rotate it instead if the player rightclicked with the appropriate item.
 	 */
-	public boolean playerDeActivate(final BlockLocation anchor, Player player) {
-		if (this.player == player) {
-			if (player.hasPermission("machinadrill.deactivate-own"))
+	public boolean onLever(final BlockLocation anchor, Player player,
+			ItemStack itemInHand) {
+		if ((this.player == player && player
+				.hasPermission("machinadrill.deactivate-own"))
+				|| player.hasPermission("machinadrill.deactivate-all")) {
+			if (itemInHand != null
+					&& itemInHand.getType() == Blueprint.rotateMaterial) {
+				doRotate(anchor,
+						BlockRotation.yawFromLocation(player.getLocation()));
 				return true;
-		} else {
-			if (player.hasPermission("machinadrill.deactivate-all"))
-				return true;
+			}
+			return false;
 		}
-		return false;
+		return true;
 	}
 
 	/**
@@ -271,14 +288,23 @@ final class Drill extends Movable {
 	 *            The anchor of the Drill being deactivated
 	 */
 	public void onDeActivate(final BlockLocation anchor) {
-		// Set furnace to off state.
+		setFurnace(anchor, false);
+	}
+
+	/**
+	 * Sets the drill's furnace to the given state and set correct direction.
+	 * 
+	 * @param anchor
+	 *            The drill's anchor
+	 * @param burning
+	 *            Whether the furnace should be burning.
+	 */
+	void setFurnace(final BlockLocation anchor, final boolean burning) {
 		Block furnace = anchor.getRelative(
 				blueprint.getByIndex(Blueprint.furnaceIndex, yaw,
 						Blueprint.mainModuleIndex)).getBlock();
-		if (furnace.getType() == Material.BURNING_FURNACE) {
-			Inventory inventory = ((Furnace) furnace.getState()).getInventory();
-			Fuel.setFurnace(furnace, yaw.getOpposite().getFacing(), false,
-					inventory);
-		}
+		Inventory inventory = ((Furnace) furnace.getState()).getInventory();
+		Fuel.setFurnace(furnace, yaw.getOpposite().getYawFace(), burning,
+				inventory);
 	}
 }

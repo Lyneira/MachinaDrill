@@ -17,6 +17,7 @@ import me.lyneira.MachinaCraft.MovableBlueprint;
 import org.bukkit.Material;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 
 /**
  * MachinaBlueprint representing a Drill blueprint
@@ -35,6 +36,7 @@ final class Blueprint extends MovableBlueprint {
 	final static Material headMaterial = Material.IRON_BLOCK;
 	private final static Material furnaceMaterial = Material.FURNACE;
 	private final static Material burningFurnaceMaterial = Material.BURNING_FURNACE;
+	final static Material rotateMaterial = Material.STICK;
 
 	final static int leverIndex;
 	final static int centralBaseIndex;
@@ -57,7 +59,8 @@ final class Blueprint extends MovableBlueprint {
 				.add(new BlockVector(0, -1, 1), baseMaterial)
 				.add(new BlockVector(0, -1, -1), baseMaterial);
 		// Get handles to key blocks now. This finalizes the blueprint.
-		ListIterator<Integer> handles = mainModule.getHandlesFinal().listIterator();
+		ListIterator<Integer> handles = mainModule.getHandlesFinal()
+				.listIterator();
 		leverIndex = handles.next();
 		centralBaseIndex = handles.next();
 		furnaceIndex = handles.next();
@@ -96,7 +99,7 @@ final class Blueprint extends MovableBlueprint {
 	 * defined above must be detected manually.
 	 */
 	public Machina detect(Player player, final BlockLocation anchor,
-			final BlockFace leverFace) {
+			final BlockFace leverFace, ItemStack itemInHand) {
 		if (leverFace != BlockFace.UP)
 			return null;
 
@@ -112,17 +115,27 @@ final class Blueprint extends MovableBlueprint {
 		if (centralBase.checkType(baseMaterial)) {
 			// Search for a furnace around the central base.
 			for (BlockRotation i : BlockRotation.values()) {
-				if (centralBase.getRelative(i.getFacing()).checkType(
+				if (centralBase.getRelative(i.getYawFace()).checkType(
 						furnaceMaterial)) {
 					BlockRotation yaw = i.getOpposite();
-					if (anchor.getRelative(yaw.getFacing()).checkType(
+					if (anchor.getRelative(yaw.getYawFace()).checkType(
 							headMaterial)) {
 						// The key blocks and yaw have been detected, now we can
 						// leave the rest to the MovableBlueprint framework.
 						if (detectOther(anchor, yaw, mainModuleIndex)) {
-							List<Integer> detectedModules = new ArrayList<Integer>(1);
+							List<Integer> detectedModules = new ArrayList<Integer>(
+									1);
 							detectedModules.add(mainModuleIndex);
-							return new Drill(instance, player, anchor, yaw, detectedModules);
+							Drill drill = new Drill(instance, detectedModules,
+									yaw, player, anchor);
+							if (itemInHand != null
+									&& itemInHand.getType() == rotateMaterial) {
+								drill.doRotate(anchor, BlockRotation
+										.yawFromLocation(player.getLocation()));
+								drill.onDeActivate(anchor);
+								drill = null;
+							}
+							return drill;
 						} else {
 							return null;
 						}
