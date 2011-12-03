@@ -6,6 +6,7 @@ import me.lyneira.MachinaCraft.BlockData;
 import me.lyneira.MachinaCraft.BlockLocation;
 import me.lyneira.MachinaCraft.BlockRotation;
 import me.lyneira.MachinaCraft.BlockVector;
+import me.lyneira.MachinaCraft.EventSimulator;
 import me.lyneira.MachinaCraft.Fuel;
 import me.lyneira.MachinaCraft.HeartBeatEvent;
 import me.lyneira.MachinaCraft.Movable;
@@ -15,7 +16,6 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.Furnace;
 import org.bukkit.entity.Player;
-import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
@@ -107,19 +107,11 @@ final class Drill extends Movable {
      */
     private boolean doDrill(final BlockLocation anchor) {
         if (BlockData.isDrillable(nextTypeId)) {
-            // Simulate a block break event on behalf of the player who started
-            // the drill. Only break if the event wasn't cancelled by whatever
-            // protection plugins may exist.
-            Block block = queuedTarget.getBlock();
-            BlockBreakEvent breakEvent = new BlockBreakEvent(block, player);
-            MachinaDrill.pluginManager.callEvent(breakEvent);
-            if (breakEvent.isCancelled()) {
+            if (! EventSimulator.blockBreak(queuedTarget, player))
                 return false;
-            }
 
-            if (!useEnergy(anchor, BlockData.getDrillTime(nextTypeId))) {
+            if (!useEnergy(anchor, BlockData.getDrillTime(nextTypeId)))
                 return false;
-            }
 
             ItemStack item = BlockData.breakBlock(queuedTarget);
             queuedTarget.setType(Material.AIR);
