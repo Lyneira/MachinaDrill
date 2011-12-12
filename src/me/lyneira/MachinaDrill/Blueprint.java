@@ -35,11 +35,13 @@ final class Blueprint extends MovableBlueprint {
     final static Material headMaterial = Material.IRON_BLOCK;
     private final static Material furnaceMaterial = Material.FURNACE;
     private final static Material burningFurnaceMaterial = Material.BURNING_FURNACE;
+    final static Material chestMaterial = Material.CHEST;
     final static Material rotateMaterial = Material.STICK;
 
     final static int leverIndex;
     final static int centralBaseIndex;
     final static int furnaceIndex;
+    final static int chestIndex;
     final static int drillHeadIndex;
 
     static {
@@ -48,8 +50,16 @@ final class Blueprint extends MovableBlueprint {
         BlueprintFactory mainModule = new BlueprintFactory();
         blueprints.add(mainModule);
         mainModule
-                // Add key blocks
-                .addKey(new BlockVector(0, 1, 0), Material.LEVER).addKey(new BlockVector(0, -1, 0), baseMaterial).addKey(new BlockVector(-1, -1, 0), burningFurnaceMaterial)
+        // Add key blocks
+        // Lever
+                .addKey(new BlockVector(0, 1, 0), Material.LEVER)
+                // Central base, used for ground detection
+                .addKey(new BlockVector(0, -1, 0), baseMaterial)
+                // Furnace
+                .addKey(new BlockVector(-1, -1, 0), burningFurnaceMaterial)
+                // Output chest
+                .addKey(new BlockVector(-1, 0, 0), chestMaterial)
+                // Head
                 .addKey(new BlockVector(1, 0, 0), headMaterial)
                 // Add non-key blocks
                 .add(new BlockVector(0, 0, 0), anchorMaterial).add(new BlockVector(0, -1, 1), baseMaterial).add(new BlockVector(0, -1, -1), baseMaterial);
@@ -58,6 +68,7 @@ final class Blueprint extends MovableBlueprint {
         leverIndex = handles.next();
         centralBaseIndex = handles.next();
         furnaceIndex = handles.next();
+        chestIndex = handles.next();
         drillHeadIndex = handles.next();
 
         // Add drill pattern data 3x3
@@ -104,31 +115,39 @@ final class Blueprint extends MovableBlueprint {
             return null;
 
         BlockLocation centralBase = anchor.getRelative(BlockFace.DOWN);
-        if (centralBase.checkType(baseMaterial)) {
-            // Search for a furnace around the central base.
-            for (BlockRotation i : BlockRotation.values()) {
-                if (centralBase.getRelative(i.getYawFace()).checkType(furnaceMaterial)) {
-                    BlockRotation yaw = i.getOpposite();
-                    if (anchor.getRelative(yaw.getYawFace()).checkType(headMaterial)) {
-                        // The key blocks and yaw have been detected, now we can
-                        // leave the rest to the MovableBlueprint framework.
-                        if (detectOther(anchor, yaw, mainModuleIndex)) {
-                            List<Integer> detectedModules = new ArrayList<Integer>(1);
-                            detectedModules.add(mainModuleIndex);
-                            Drill drill = new Drill(instance, detectedModules, yaw, player, anchor);
-                            if (itemInHand != null && itemInHand.getType() == rotateMaterial) {
-                                drill.doRotate(anchor, BlockRotation.yawFromLocation(player.getLocation()));
-                                drill.onDeActivate(anchor);
-                                drill = null;
-                            }
-                            return drill;
-                        } else {
-                            return null;
-                        }
-                    }
-                }
+        if (!centralBase.checkType(baseMaterial))
+            return null;
+
+        // Search for a furnace around the central base.
+        for (BlockRotation i : BlockRotation.values()) {
+            if (!centralBase.getRelative(i.getYawFace()).checkType(furnaceMaterial))
+                continue;
+
+            if (!anchor.getRelative(i.getYawFace()).checkType(chestMaterial))
+                continue;
+
+            BlockRotation yaw = i.getOpposite();
+            if (!anchor.getRelative(yaw.getYawFace()).checkType(headMaterial))
+                continue;
+
+            // The key blocks and yaw have been detected, now we can
+            // leave the rest to the MovableBlueprint framework.
+            if (!detectOther(anchor, yaw, mainModuleIndex))
+                continue;
+
+            // Detection was a success, now make the new drill.
+            List<Integer> detectedModules = new ArrayList<Integer>(1);
+            detectedModules.add(mainModuleIndex);
+            Drill drill = new Drill(instance, detectedModules, yaw, player, anchor);
+            if (itemInHand != null && itemInHand.getType() == rotateMaterial) {
+                // Support for rotation on a non-activated drill
+                drill.doRotate(anchor, BlockRotation.yawFromLocation(player.getLocation()));
+                drill.onDeActivate(anchor);
+                drill = null;
             }
+            return drill;
         }
+
         return null;
     }
 }

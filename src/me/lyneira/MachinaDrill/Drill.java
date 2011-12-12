@@ -11,8 +11,8 @@ import me.lyneira.MachinaCraft.Fuel;
 import me.lyneira.MachinaCraft.HeartBeatEvent;
 import me.lyneira.MachinaCraft.Movable;
 
-import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.Chest;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.Furnace;
 import org.bukkit.entity.Player;
@@ -107,17 +107,22 @@ final class Drill extends Movable {
      */
     private boolean doDrill(final BlockLocation anchor) {
         if (BlockData.isDrillable(nextTypeId)) {
-            if (! EventSimulator.blockBreak(queuedTarget, player))
+            Block chest = anchor.getRelative(blueprint.getByIndex(Blueprint.chestIndex, yaw, Blueprint.mainModuleIndex)).getBlock();
+            Inventory inventory = ((Chest) chest.getState()).getInventory();
+            if (inventory.firstEmpty() < 0)
+                return false;
+
+            if (!EventSimulator.blockBreak(queuedTarget, player))
                 return false;
 
             if (!useEnergy(anchor, BlockData.getDrillTime(nextTypeId)))
                 return false;
 
             ItemStack item = BlockData.breakBlock(queuedTarget);
-            queuedTarget.setType(Material.AIR);
+            queuedTarget.setEmpty();
+            // Put item in the container
             if (item != null) {
-                // Drop item above the furnace
-                anchor.getRelative(blueprint.getByIndex(Blueprint.furnaceIndex, yaw, Blueprint.mainModuleIndex).add(BlockFace.UP)).dropItem(item);
+                inventory.addItem(item);
             }
         }
         return true;
