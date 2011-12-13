@@ -152,7 +152,7 @@ final class Drill extends Movable {
 
         // Simulate a block place event to give protection plugins a chance to
         // stop the drill move
-        if (!canPlace(newAnchor, Blueprint.drillHeadIndex, Blueprint.headMaterial, Blueprint.mainModuleIndex)) {
+        if (!canMove(newAnchor, Blueprint.drillHeadIndex, Blueprint.headMaterial, Blueprint.mainModuleIndex)) {
             return null;
         }
 
