@@ -107,9 +107,6 @@ final class Blueprint extends MovableBlueprint {
         if (leverFace != BlockFace.UP)
             return null;
 
-        if (!player.hasPermission("machinadrill.activate"))
-            return null;
-
         // Check if the drill is on solid ground.
         if (!BlockData.isSolid(anchor.getRelative(BlockFace.DOWN, 2).getTypeId()))
             return null;
@@ -134,6 +131,11 @@ final class Blueprint extends MovableBlueprint {
             // leave the rest to the MovableBlueprint framework.
             if (!detectOther(anchor, yaw, mainModuleIndex))
                 continue;
+            
+            if (!player.hasPermission("machinadrill.activate")) {
+                player.sendMessage("You do not have permission to activate a drill.");
+                return null;
+            }
 
             // Detection was a success, now make the new drill.
             List<Integer> detectedModules = new ArrayList<Integer>(1);
